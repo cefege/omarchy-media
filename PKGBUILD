@@ -1,6 +1,6 @@
 # Maintainer: cefege <cefege@users.noreply.github.com>
 pkgname=omarchy-media
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc='Native replacements for the Omarchy shell commands that run while a key is held down'
 arch=('aarch64' 'x86_64')
@@ -13,7 +13,7 @@ optdepends=('brightnessctl: internal panel brightness without root'
             'hyprland: monitor names and DPMS dispatch'
             'quickshell: the on-screen display')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/cefege/omarchy-media/archive/v$pkgver.tar.gz")
-sha256sums=('e9bf8421ee9675511856cdde0334a964dbeb8bb60ffe264c5d9a1fb6c68f0b4a')
+sha256sums=('d3f458854a182ac063cf999dac32703ec6ee8ad29932f6ad06843837a223b205')
 
 build() {
     cd "$srcdir/$pkgname-$pkgver"
