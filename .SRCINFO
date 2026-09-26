@@ -1,0 +1,17 @@
+pkgbase = omarchy-media
+	pkgdesc = Native replacements for the Omarchy shell commands that run while a key is held down
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/cefege/omarchy-media
+	arch = aarch64
+	arch = x86_64
+	license = MIT
+	makedepends = cargo
+	optdepends = brightnessctl: internal panel brightness without root
+	optdepends = ddcutil: external displays over DDC/CI
+	optdepends = hyprland: monitor names and DPMS dispatch
+	optdepends = quickshell: the on-screen display
+	source = omarchy-media-0.1.0.tar.gz::https://github.com/cefege/omarchy-media/archive/v0.1.0.tar.gz
+	sha256sums = e9bf8421ee9675511856cdde0334a964dbeb8bb60ffe264c5d9a1fb6c68f0b4a
+
+pkgname = omarchy-media
