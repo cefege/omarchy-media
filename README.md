@@ -27,18 +27,29 @@ this binary.
 
 ## Measured
 
-On the machine this was developed on (aarch64, Hyprland, one internal panel),
-20 invocations of the query form:
+`omarchy-media bench` runs the query form 50 times with every helper on
+`PATH` replaced by a logging stub, and reports what the run cost and what it
+called. On the machine this was developed on (aarch64, Hyprland, one internal
+panel):
+
+```
+  mean    0.76 ms        ← the work, excluding the fork the parent pays
+  hyprland socket: in use
+  helper processes invoked: 0
+```
+
+The comparable figure is a shell loop over each side, 50 runs, timed the same
+way on the same machine:
 
 | | Per invocation | Processes |
 |---|---:|---:|
-| `omarchy-brightness-display` (bash) | 39 ms | ~16 |
-| `omarchy-media brightness display` | 12–16 ms | 0 |
+| `omarchy-brightness-display` (bash) | 25.3 ms | ~16 |
+| `omarchy-media brightness display` | 9.7 ms | 1 |
+| `/bin/true`, for scale | 7.4 ms | 1 |
 
-The native figure sits on this box's process-spawn floor — `/bin/true` costs
-16 ms here — so the remaining time is `fork`/`exec`, not the work. On a machine
-where spawning costs about a millisecond, the same comparison is roughly
-16 ms against 1.5 ms. The honest summary is the process count: sixteen becomes
+So on this box a press is 25.3 ms against 9.7 ms, and 7.4 ms of the remainder
+is the cost of starting any process at all — this machine spawns slowly. The
+work itself is under a millisecond, and the process count goes from sixteen to
 one.
 
 Output is identical: both print `30` for the panel at 126/420, and a `+5%` step
@@ -91,7 +102,7 @@ ln -s omarchy-media /usr/bin/omarchy-brightness-display
 ```
 
 The binary dispatches on the name it was invoked as, so the symlink is the
-whole installation. An AUR `PKGBUILD` is included.
+whole installation. An Arch `PKGBUILD` is included.
 
 ## Tests
 
@@ -99,10 +110,16 @@ whole installation. An AUR `PKGBUILD` is included.
 cargo test
 ```
 
-24 tests, all against the rules the shell implements: the JSON read from
+39 tests. 25 against the rules the shell implements — the JSON read from
 Hyprland, the Apple-display filter, the lit-display check, the backlight device
 heuristic, the percentage roundings on both backends, the DDC bus/connector
-pairing, the step rule near the bottom of the range, and the OSD payload.
+pairing, the step rule near the bottom of the range, the Apple cache
+validation, and the OSD payload.
+
+14 more drive the built binary the way a desktop does, with logging stubs for
+`hyprctl`, `ddcutil` and `brightnessctl`: the percentages on stdout, the exact
+`ddcutil` calls, and when detection is and is not repeated. They are the
+upstream shell suite ported case for case, and they found four bugs here.
 
 ## Licence
 

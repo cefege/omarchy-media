@@ -8,6 +8,7 @@
 
 mod apple;
 mod backlight;
+mod bench;
 mod ddc;
 mod hypr;
 mod json;
@@ -28,6 +29,10 @@ Options:
                           focused one
   -h, --help              Show this help
 ";
+
+/// A key held down repeats at the compositor's rate, so what matters is the
+/// cost of a single press; fifty runs is enough to see the floor.
+const DEFAULT_BENCH_RUNS: u32 = 50;
 
 /// The shell treats a leading eDP-, LVDS- or DSI- connector as the internal
 /// panel, which is the one it can write directly.
@@ -214,6 +219,16 @@ fn run(argv: Vec<String>) -> ExitCode {
             Some("brightness") if args.get(1).map(String::as_str) == Some("display") => {
                 brightness_display(&args[2..])
             }
+            Some("bench") => match args.get(1).and_then(|v| v.strip_prefix("--runs=")) {
+                Some(value) => match value.parse() {
+                    Ok(runs) => bench::run(runs),
+                    Err(_) => {
+                        eprintln!("omarchy-media bench: --runs wants a number, got `{value}`");
+                        ExitCode::from(2)
+                    }
+                },
+                None => bench::run(DEFAULT_BENCH_RUNS),
+            },
             _ => {
                 let _ = writeln!(std::io::stderr(), "omarchy-media: unknown command");
                 let _ = write!(std::io::stderr(), "{USAGE}");

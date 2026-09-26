@@ -48,6 +48,12 @@ fn socket_request(command: &str) -> Option<String> {
     Some(reply)
 }
 
+/// Whether the compositor's request socket is there, which decides whether a
+/// press costs a socket round trip or a `hyprctl` process.
+pub fn socket_reachable() -> bool {
+    socket_path().is_some_and(|path| path.exists())
+}
+
 fn hyprctl_monitors() -> Result<Vec<Json>, String> {
     let output = Command::new("hyprctl")
         .args(["monitors", "-j"])
@@ -215,3 +221,4 @@ mod tests {
         )));
     }
 }
+
