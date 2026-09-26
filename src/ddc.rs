@@ -58,33 +58,46 @@ pub fn raw_of(target: i64, max: u64) -> u64 {
     (target.clamp(1, 100) as u64 * max + 50) / 100
 }
 
-struct Cache {
-    bus: String,
-    max: Option<u64>,
-    at: Option<u64>,
+/// The cache file has two shapes, and mixing them up is the bug this type
+/// exists to prevent: a reading is `bus max timestamp`, and a failed detection
+/// is `unavailable timestamp`. Reading the timestamp of the second shape as a
+/// range would make every cached failure look sixty seconds stale.
+enum Cache {
+    Unavailable { at: u64 },
+    Range { bus: String, max: u64, at: u64 },
 }
 
 impl Cache {
     fn read(path: &Path) -> Option<Self> {
         let text = fs::read_to_string(path).ok()?;
         let mut fields = text.split_whitespace();
-        Some(Self {
-            bus: fields.next()?.to_string(),
-            max: fields.next().and_then(|f| f.parse().ok()),
-            at: fields.next().and_then(|f| f.parse().ok()),
+        let first = fields.next()?;
+        let second = fields.next().and_then(|f| f.parse().ok());
+        let third = fields.next().and_then(|f| f.parse().ok());
+
+        if first == "unavailable" {
+            return Some(Cache::Unavailable { at: second.unwrap_or(0) });
+        }
+        Some(Cache::Range {
+            bus: first.to_string(),
+            max: second?,
+            at: third?,
         })
     }
 
     /// A usable bus is a plain number; the shell checks the same with a regex.
     fn bus_number(&self) -> Option<&str> {
-        (!self.bus.is_empty() && self.bus.chars().all(|c| c.is_ascii_digit())).then_some(&self.bus)
+        match self {
+            Cache::Range { bus, .. } if usable_bus(bus) => Some(bus),
+            _ => None,
+        }
     }
 
     fn range_is_fresh(&self) -> bool {
-        match (self.max, self.at) {
-            (Some(max), Some(at)) if max > 0 => {
+        match self {
+            Cache::Range { max, at, .. } if *max > 0 => {
                 let now = now();
-                at <= now && now - at < RANGE_CACHE_SECONDS
+                *at <= now && now - *at < RANGE_CACHE_SECONDS
             }
             _ => false,
         }
@@ -154,33 +167,35 @@ fn usable_bus(bus: &str) -> bool {
 }
 
 fn find_bus(monitor: &str, path: &Path) -> Option<String> {
-    let mut bus = String::new();
+    let mut cached = String::new();
     if let Some(cache) = Cache::read(path) {
-        if cache.bus == "unavailable" {
-            // Detection failed recently; do not pay for it on every key repeat.
-            if now().saturating_sub(cache.at.unwrap_or(0)) < UNAVAILABLE_CACHE_SECONDS {
-                return None;
+        match cache {
+            // Detection failed recently; do not pay for it on every key
+            // repeat.
+            Cache::Unavailable { at } => {
+                if now().saturating_sub(at) < UNAVAILABLE_CACHE_SECONDS {
+                    return None;
+                }
+                let _ = fs::remove_file(path);
             }
-            let _ = fs::remove_file(path);
-        } else {
-            bus = cache.bus;
+            Cache::Range { bus, .. } => cached = bus,
         }
     }
 
-    if bus.is_empty() {
-        let output = ddcutil(&["--skip-ddc-checks", "detect", "--brief"])?;
-        match detect_bus(monitor, &output).filter(|bus| usable_bus(bus)) {
-            Some(found) => {
-                write_cache(path, &format!("{found}\n"));
-                Some(found)
-            }
-            None => {
-                write_cache(path, &format!("unavailable {}\n", now()));
-                None
-            }
+    if !cached.is_empty() {
+        return Some(cached);
+    }
+
+    let output = ddcutil(&["--skip-ddc-checks", "detect", "--brief"])?;
+    match detect_bus(monitor, &output).filter(|bus| usable_bus(bus)) {
+        Some(found) => {
+            write_cache(path, &format!("{found}\n"));
+            Some(found)
         }
-    } else {
-        Some(bus)
+        None => {
+            write_cache(path, &format!("unavailable {}\n", now()));
+            None
+        }
     }
 }
 
@@ -232,7 +247,25 @@ impl Brightness {
     pub fn percent(&self) -> i64 {
         percent_of(self.current, self.max)
     }
-
+    /// Reconstruct what a write needs from a cache entry a recent read wrote,
+    /// so an absolute step does not go back to the monitor for a range it
+    /// already has.
+    pub fn from_cache(path: &Path) -> Option<Self> {
+        let cache = Cache::read(path)?;
+        if cache.bus_number().is_none() || !cache.range_is_fresh() {
+            return None;
+        }
+        let Cache::Range { bus, max, .. } = cache else {
+            return None;
+        };
+        Some(Self {
+            monitor: String::new(),
+            bus,
+            // An absolute step needs only the range, not the current value.
+            current: 0,
+            max,
+        })
+    }
     fn set(&self, target: i64) -> Result<(), String> {
         let raw = raw_of(target, self.max).to_string();
         let applied = ddcutil(&[
@@ -263,46 +296,40 @@ pub fn query(monitor: &str) -> Option<i64> {
 }
 
 /// Apply a step to an external monitor and return the percentage reached, which
-/// is what the OSD shows. An absolute step may be served from the cache when
-/// the range was read recently, exactly as the script's ten-second window
-/// allows; a relative step always reads, because it needs the current value.
+/// is what the OSD shows.
+///
+/// An absolute step may be served from the cache when the range was read
+/// recently, exactly as the script's ten-second window allows, and the write
+/// then reuses that same cached bus. A relative step needs the current value,
+/// so it reads once and reuses that. Either way one press costs one I2C
+/// transaction, not two.
 pub fn apply(monitor: &str, step: &str) -> Result<i64, String> {
     let path = cache_file(monitor);
 
-    let target = if let Some(amount) = step.strip_prefix('+').and_then(|s| s.strip_suffix('%')) {
+    let (target, brightness) = if let Some(amount) = step.strip_prefix('+').and_then(|s| s.strip_suffix('%')) {
         let amount: i64 = amount.parse().map_err(|_| format!("invalid step: {step}"))?;
-        let percent = Brightness::read(monitor).ok_or("could not read the monitor")?.percent();
-        if amount == 5 && percent < 5 {
-            percent + 1
-        } else {
-            percent + amount
-        }
+        let brightness = Brightness::read(monitor).ok_or("could not read the monitor")?;
+        let percent = brightness.percent();
+        let target = if amount == 5 && percent < 5 { percent + 1 } else { percent + amount };
+        (target, Some(brightness))
     } else if let Some(amount) = step.strip_suffix("%-") {
         let amount: i64 = amount.parse().map_err(|_| format!("invalid step: {step}"))?;
-        let percent = Brightness::read(monitor).ok_or("could not read the monitor")?.percent();
-        if amount == 5 && percent <= 5 {
-            percent - 1
-        } else {
-            percent - amount
-        }
+        let brightness = Brightness::read(monitor).ok_or("could not read the monitor")?;
+        let percent = brightness.percent();
+        let target = if amount == 5 && percent <= 5 { percent - 1 } else { percent - amount };
+        (target, Some(brightness))
     } else if let Some(absolute) = step.strip_suffix('%') {
         let target: i64 = absolute.parse().map_err(|_| format!("invalid step: {step}"))?;
-        let fresh = Cache::read(&path)
-            .is_some_and(|cache| cache.bus_number().is_some() && cache.range_is_fresh());
-        if !fresh && Brightness::read(monitor).is_none() {
-            return Err("could not read the monitor".into());
+        match Brightness::from_cache(&path) {
+            Some(cached) => (target, Some(cached)),
+            None => (target, Some(Brightness::read(monitor).ok_or("could not read the monitor")?)),
         }
-        target
     } else {
         return Err(format!("invalid step: {step}"));
     };
 
     let target = target.clamp(1, 100);
-
-    // Reuse the bus and range the read above just cached, rather than paying
-    // for a second getvcp on the same press.
-    let brightness = Brightness::read(monitor).ok_or("could not read the monitor")?;
-    brightness.set(target)?;
+    brightness.ok_or("could not read the monitor")?.set(target)?;
     Ok(target)
 }
 
