@@ -29,7 +29,9 @@ package() {
     cd "$srcdir/$pkgname-$pkgver"
     install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
 
-    # The binary dispatches on argv[0], so the command it replaces is a link.
-    # Everything that calls `omarchy-brightness-display` keeps working.
-    ln -s "$pkgname" "$pkgdir/usr/bin/omarchy-brightness-display"
+    # Only the binary. The `omarchy` package owns
+    # /usr/bin/omarchy-brightness-display, and shipping a second file at that
+    # path is a conflict; the wrapper that execs this one lives there instead,
+    # which is also what keeps the command name working for every binding,
+    # menu and script that already calls it.
 }

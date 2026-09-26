@@ -101,8 +101,13 @@ install -Dm755 target/release/omarchy-media /usr/bin/omarchy-media
 ln -s omarchy-media /usr/bin/omarchy-brightness-display
 ```
 
-The binary dispatches on the name it was invoked as, so the symlink is the
-whole installation. An Arch `PKGBUILD` is included.
+The binary dispatches on the name it was invoked as, so the symlink is the whole
+installation.
+
+The Arch package deliberately ships **only** `/usr/bin/omarchy-media`. The
+`omarchy` package owns `/usr/bin/omarchy-brightness-display`, and a second file
+at that path is a conflict; the wrapper that execs this binary lives there
+instead, which is what keeps every existing binding, menu and script working.
 
 ## Tests
 
