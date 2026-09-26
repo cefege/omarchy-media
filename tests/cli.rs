@@ -196,10 +196,9 @@ fn an_absolute_step_reuses_the_cached_range() {
     let before = harness.count("getvcp 10");
     harness.run(&["--no-osd", "--monitor", "DP-1", "30%"]);
 
-    // The script skips the read when the range was refreshed within ten
-    // seconds; the native path has to behave the same way or a held key turns
-    // into a burst of I2C traffic.
-    assert_eq!(harness.count("getvcp 10"), before + 1, "one read, not two");
+    // The range was read moments ago, so an absolute step spends no I2C
+    // transaction at all; a held key would otherwise turn into a burst.
+    assert_eq!(harness.count("getvcp 10"), before, "no read for a cached range");
     assert!(harness
         .calls()
         .contains("ddcutil --bus 7 --skip-ddc-checks --noverify setvcp 10 24"));

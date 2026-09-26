@@ -170,9 +170,34 @@ mod tests {
     }
 
     #[test]
-    fn only_hid_character_devices_are_accepted() {
-        assert!(!looks_like_hid_device("/dev/null"));
-        assert!(!looks_like_hid_device("/tmp/not-a-device"));
-        assert!(!looks_like_hid_device("/dev/hiddev0"));
+    fn a_cached_path_is_rejected_unless_it_is_a_hiddev_node() {
+        // The display replugs, the interface renumbers, and the cached node is
+        // simply gone; handing that path to asdcontrol is worse than detecting
+        // again. Each of these is refused on the prefix, and a node that
+        // matches the prefix but is not a character device is refused on the
+        // node type.
+        for poison in ["/dev/null", "/tmp/omarchy-evil", "/dev/hiddev999", "/dev/usb/hiddev999", ""] {
+            assert!(!looks_like_hid_device(poison), "{poison} should be refused");
+        }
+
+        let regular = std::env::temp_dir().join("omarchy-media-apple-not-a-device");
+        fs::write(&regular, "").unwrap();
+        assert!(!looks_like_hid_device(regular.to_str().unwrap()));
+        let _ = fs::remove_file(&regular);
+    }
+
+    #[test]
+    fn the_cache_is_only_consulted_under_a_user_private_runtime_dir() {
+        // With no XDG_RUNTIME_DIR the shell skips caching entirely rather than
+        // fall back to a world-writable /tmp path another user could
+        // pre-create, so there is no cache path to poison.
+        let path = PathBuf::from("/tmp/omarchy-brightness-display-apple.device");
+        let previous = std::env::var_os("XDG_RUNTIME_DIR");
+        unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+        assert_eq!(device_cache(), None);
+        if let Some(value) = previous {
+            std::env::set_var("XDG_RUNTIME_DIR", value);
+        }
+        assert_ne!(device_cache(), Some(path));
     }
 }

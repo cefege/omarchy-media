@@ -235,7 +235,10 @@ impl Brightness {
             let _ = fs::remove_file(&path);
             return None;
         };
-        write_cache(&path, &format!("{bus} {current} {max} {}\n", now()));
+        // The cache is `bus max timestamp`, the same three fields the shell
+        // writes: the current value is not stored, because only the range is
+        // reused, and a fourth field would shift every later read.
+        write_cache(&path, &format!("{bus} {max} {}\n", now()));
         Some(Self {
             monitor: monitor.to_string(),
             bus,
